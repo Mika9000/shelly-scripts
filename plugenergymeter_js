@@ -1,0 +1,152 @@
+/**
+ * @summary Shelly Plug energy meter. Color of the light shows how much unused solar energy is available
+ * @author Mika Aronen <github.com/Mika9000>
+ *
+ * Inspired by Shelly Plug S Spot Price Illuminator <https://github.com/shellykauppa/plug-s-spot-illuminator>
+ *
+ **/
+
+const CONFIG = {
+  energymeterAPI: 'http://192.168.2.121/meter/', //CTek Nanogrid Air
+  baseConsumption: 0, //Set suitable value here if energy reading is not a net yield
+  
+  readinterval: 60, //seconds
+  blinkinterval: 2,
+
+  brightlight: 100, //Light normal brightness
+  dimlight: 50,     //Blinking light's dimmed phase
+
+  powerColors: [
+    { reading: -3500, color: [0,100,12], blink: true },  //Bluish green
+    { reading: -1500, color: [12,100,0], blink: false }, //Green
+    { reading: -100, color: [100,69,0], blink: false },  //Greenish yellow
+    { reading: 100, color: [100,31,0], blink: false },   //Orange
+    { reading: 1000, color: [100,12,0], blink: false },  //Reddish orange
+    { reading: 3500, color: [100,0,0], blink: false },   //Red
+    { reading: 9999, color: [100,0,6], blink: true },    //Bright red
+    { reading: 10001, color: [31,31,31], blink: false }  //White, error/wait
+  ]
+};
+
+const VERSION = {
+  number: '1.0',
+  date: '250617',
+};
+
+const PLEASEWAIT = 10000;
+
+var previousresult=0;
+
+var light = {
+  bright: false,
+  blinking: false,
+  color: [0,0,0]
+}
+
+
+function ApiError(response, error_code, error_message) {
+  if (error_code !== 0) {
+    console.log('ApiError: ' + JSON.stringify(error_code) + ' ' + error_message);
+  }
+}
+
+
+//Set plug mode to "switch"
+function SetMode() {
+  let uiConfig = Shelly.getComponentConfig("plugs_ui");
+  
+  if ( uiConfig.leds.mode !== "switch" ) {
+    uiConfig.leds.mode = "switch";
+    Shelly.call( "PLUGS_UI.SetConfig", { config: uiConfig } )
+  }
+}
+
+
+//Set led color and brightness
+function SetLed(rgbArray,brit) {
+  let color = { rgb: rgbArray, brightness: brit };
+  let config = Shelly.getComponentConfig("plugs_ui");
+
+  config.leds.colors["switch:0"].on = color;
+  
+  Shelly.call(
+    "HTTP.Request", 
+    { method: "GET", url: "http://localhost/rpc/PLUGS_UI.SetConfig?config=" + JSON.stringify(config), timeout: 30, ssl_ca: "*" }, 
+    ApiError
+  );
+}
+
+
+//Blink light (called by timer)
+function LightBlinken() {
+  if ( !light.blinking ) return;
+
+  light.bright = !light.bright;
+
+  let brightness = (light.bright) ? CONFIG.brightlight : CONFIG.dimlight;
+
+  SetLed(light.color, brightness);
+}
+
+
+//Pick color that matches power reading
+function SetColor(reading) {
+  let found=false;
+
+  CONFIG.powerColors.forEach( function(step) {
+    if (!found && reading < step.reading) {
+      light.color = step.color;
+      light.blinking = step.blink;
+      found=true; //Skip more demanding comparison after matching step was found
+    }
+  });
+
+  if (!light.blinking) SetLed(light.color, CONFIG.brightlight); //blinking lights are handled by blink timer
+}
+
+
+//Callback function for api call
+function QueryResponse(res, error_code, error_msg) {
+  let result = PLEASEWAIT;
+  
+  if (error_code !== 0) {
+    console.log("Meter: Invalid response: " + JSON.stringify(error_code) + " " + error_msg);
+    
+  } else {
+    if (res.code === 200) {  
+      let st = JSON.parse(res.body);
+      //Power reading. Result is watts, negative sign when production exceeds consumption
+      
+      //CTek Nanogrid Air
+      result = parseInt((st.activePowerIn - st.activePowerOut)*1000); //Nanogrid, calculate net consumption and convert kW to W
+      
+      //For solar panel reading following code may be adapted. Note negative sign and baseConsumption that is added to the value
+      //result = -1 * parseInt(st.power.production) +  CONFIG.baseConsumption;
+    } 
+  }
+  
+  if (result != previousresult) {
+    previousresult = result;
+    SetColor(result);
+    //console.log("Result is " + JSON.stringify(result) );
+  }
+}
+
+
+//Get power reading (called by timer)
+function TakeReading () {
+  Shelly.call("HTTP.GET", { url: CONFIG.energymeterAPI, timeout:30, ssl_ca:"*" }, QueryResponse);
+}
+
+
+console.log('Energyplug v' + VERSION.number + ' ' + VERSION.date);
+
+SetMode();
+SetColor(PLEASEWAIT);
+
+// First round
+TakeReading();
+
+// Set timers
+Timer.set( CONFIG.readinterval * 1000, true, TakeReading );
+Timer.set( CONFIG.blinkinterval * 1000, true, LightBlinken );
