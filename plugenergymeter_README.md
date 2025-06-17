@@ -1,6 +1,8 @@
 # Shelly Plug Energy Meter
 
-Synopsis: A script to use Shelly Plug as an energy meter. The color of the light indicates how much solar energy is available.
+Synopsis: Turns Shelly Plug into an energy meter.
+
+The color of the light indicates how much unused solar energy is available, which helps, for example, decide whether another home appliance can be turned on. If the energy reading the meter uses is net yield, it also warns of very high consumption.
 
 Inspired by [Shelly Plug S Spot Price Illuminator](https://github.com/shellykauppa/plug-s-spot-illuminator)
 
