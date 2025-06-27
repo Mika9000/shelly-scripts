@@ -1,5 +1,5 @@
 /**
- * @summary Shelly Plug energy meter. Color of the light shows how much unused solar energy is available
+ * @summary Shelly Plug energy meter. Color of the plug's light shows how much unused solar energy is available
  * @author Mika Aronen <github.com/Mika9000>
  *
  * Inspired by Shelly Plug S Spot Price Illuminator <https://github.com/shellykauppa/plug-s-spot-illuminator>
@@ -13,104 +13,128 @@ const CONFIG = {
   readinterval: 60, //seconds
   blinkinterval: 2,
 
-  brightlight: 100, //Light normal brightness
-  dimlight: 50,     //Blinking light's dimmed phase
+  brightlight: 100, //normal brightness
+  dimlight: 50,     //dimmed phase when blinking
 
-  powerColors: [
-    { reading: -3500, color: [0,100,12], blink: true },  //Bluish green
-    { reading: -1500, color: [12,100,0], blink: false }, //Green
-    { reading: -100, color: [100,69,0], blink: false },  //Greenish yellow
-    { reading: 100, color: [100,31,0], blink: false },   //Orange
-    { reading: 1000, color: [100,12,0], blink: false },  //Reddish orange
-    { reading: 3500, color: [100,0,0], blink: false },   //Red
-    { reading: 9999, color: [100,0,6], blink: true },    //Bright red
-    { reading: 10001, color: [31,31,31], blink: false }  //White, error/wait
+  colorlist: [
+    { power: -3500, color: [0,100,12], blink: true },  //Bluish green
+    { power: -1500, color: [12,100,0], blink: false }, //Green
+    { power: -100, color: [100,69,0], blink: false },  //Greenish yellow
+    { power: 500, color: [100,31,0], blink: false },   //Orange
+    { power: 1500, color: [100,12,0], blink: false },  //Reddish orange
+    { power: 3500, color: [100,0,0], blink: false },   //Red
+    { power: 9999, color: [100,0,6], blink: true },    //Bright red
+    { power: 10001, color: [31,31,31], blink: false }  //White, error/wait
   ]
 };
 
 const VERSION = {
-  number: '1.0',
-  date: '250617',
+  number: '1.1',
+  date: '250626',
 };
 
-const PLEASEWAIT = 10000;
+const READINGWAIT = 10000;
 
-var previousresult=0;
+var previousresult = -1;
+var queryRunning = false;
+var measuretime;
+var timecounter = 0;
 
-var light = {
+var led = {
   bright: false,
   blinking: false,
-  color: [0,0,0]
+  color: [0,0,0],
+  unset: false
 }
 
 
-function ApiError(response, error_code, error_message) {
-  if (error_code !== 0) {
-    console.log('ApiError: ' + JSON.stringify(error_code) + ' ' + error_message);
-  }
+function ShellyResponse(response, error_code, error_message) {
+  queryRunning=false;
+  
+  if (error_code !== 0) console.log('Internal API invalid response: ' + JSON.stringify(error_code) + ' ' + error_message);
 }
 
 
-//Set plug mode to "switch"
-function SetMode() {
+//Set plug mode to "switch" and turn switch on
+function Startup() {
   let uiConfig = Shelly.getComponentConfig("plugs_ui");
   
   if ( uiConfig.leds.mode !== "switch" ) {
     uiConfig.leds.mode = "switch";
-    Shelly.call( "PLUGS_UI.SetConfig", { config: uiConfig } )
+    queryRunning=true;
+    
+    Shelly.call(
+      "PLUGS_UI.SetConfig",
+      { config: uiConfig },
+      ShellyResponse
+    );
   }
-}
-
-
-//Set led color and brightness
-function SetLed(rgbArray,brit) {
-  let color = { rgb: rgbArray, brightness: brit };
-  let config = Shelly.getComponentConfig("plugs_ui");
-
-  config.leds.colors["switch:0"].on = color;
   
   Shelly.call(
-    "HTTP.Request", 
-    { method: "GET", url: "http://localhost/rpc/PLUGS_UI.SetConfig?config=" + JSON.stringify(config), timeout: 30, ssl_ca: "*" }, 
-    ApiError
+    "switch.set",
+    { id: 0, on: true },
+    ShellyResponse
   );
 }
 
 
-//Blink light (called by timer)
-function LightBlinken() {
-  if ( !light.blinking ) return;
+//Let there be light!
+function LightLed() {
+  if (queryRunning) return; //Previous call must finish first
 
-  light.bright = !light.bright;
+  queryRunning = true;
+  led.bright = !led.bright; //Blinker
 
-  let brightness = (light.bright) ? CONFIG.brightlight : CONFIG.dimlight;
+  let color = {
+    rgb: led.color, 
+    brightness: (led.bright || led.unset) ? CONFIG.brightlight : CONFIG.dimlight
+  };
 
-  SetLed(light.color, brightness);
+  let config = Shelly.getComponentConfig("plugs_ui");
+
+  config.leds.colors["switch:0"].on = color;
+  led.unset = false;
+  
+  Shelly.call(
+    "HTTP.Request", 
+    { method: "GET", url: "http://localhost/rpc/PLUGS_UI.SetConfig?config=" + JSON.stringify(config), timeout: 30, ssl_ca: "*" }, 
+    ShellyResponse
+  );
 }
 
 
-//Pick color that matches power reading
-function SetColor(reading) {
-  let found=false;
+//Set color that matches power reading
+function SetColor(power) {
+  let found = false;
+  
+  CONFIG.colorlist.forEach( function(row, index) {
+    if (!found && power < row.power) {
+      found = true;
+      let logstr = "Reading: " + JSON.stringify(power) + ", index: " + JSON.stringify(index);
 
-  CONFIG.powerColors.forEach( function(step) {
-    if (!found && reading < step.reading) {
-      light.color = step.color;
-      light.blinking = step.blink;
-      found=true; //Skip more demanding comparison after matching step was found
+      if (index != previousresult) {
+        previousresult = index;
+        led.color = row.color;
+        led.blinking = row.blink;
+        led.unset = true; //Tell brain the color changed
+      } else {
+        logstr += ", no change";
+      }
+
+      console.log(logstr);
     }
   });
-
-  if (!light.blinking) SetLed(light.color, CONFIG.brightlight); //blinking lights are handled by blink timer
 }
 
 
-//Callback function for api call
+//Callback function for external api call
 function QueryResponse(res, error_code, error_msg) {
-  let result = PLEASEWAIT;
+  let reading = READINGWAIT;
+
+  queryRunning = false;
   
   if (error_code !== 0) {
-    console.log("Meter: Invalid response: " + JSON.stringify(error_code) + " " + error_msg);
+    console.log("External API invalid response: " + JSON.stringify(error_code) + " " + error_msg);
     
   } else {
     if (res.code === 200) {  
@@ -118,35 +142,47 @@ function QueryResponse(res, error_code, error_msg) {
       //Power reading. Result is watts, negative sign when production exceeds consumption
       
       //CTek Nanogrid Air
-      result = parseInt((st.activePowerIn - st.activePowerOut)*1000); //Nanogrid, calculate net consumption and convert kW to W
+      reading = parseInt((st.activePowerIn - st.activePowerOut)*1000); //Nanogrid, calculate net consumption and convert kW to W
       
       //For solar panel reading following code may be adapted. Note negative sign and baseConsumption that is added to the value
-      //result = -1 * parseInt(st.power.production) +  CONFIG.baseConsumption;
+      //reading = -1 * parseInt(st.power.production) +  CONFIG.baseConsumption;
     } 
   }
   
-  if (result != previousresult) {
-    previousresult = result;
-    SetColor(result);
-    //console.log("Result is " + JSON.stringify(result) );
-  }
+  SetColor(reading);
 }
 
-
-//Get power reading (called by timer)
-function TakeReading () {
+//Get power reading
+function TakeReading() {
+  if (queryRunning) return;  //Previous call must finish first
+  
+  queryRunning = true;
+  timecounter = 0;
+  
   Shelly.call("HTTP.GET", { url: CONFIG.energymeterAPI, timeout:30, ssl_ca:"*" }, QueryResponse);
 }
 
 
+//Take reading, or blink or turn on led (called by timer)
+function PlugBrains() {
+  timecounter++;
+  
+  if (timecounter >= measuretime) {
+    TakeReading();    
+  } else if (led.blinking || led.unset) {
+    LightLed();
+  }
+}
+
+
+//"Main"
 console.log('Energyplug v' + VERSION.number + ' ' + VERSION.date);
 
-SetMode();
-SetColor(PLEASEWAIT);
+Startup();
+SetColor(READINGWAIT);
 
-// First round
-TakeReading();
+measuretime = parseInt(CONFIG.readinterval / CONFIG.blinkinterval);
+timecounter = measuretime-5; //Wait 5 seconds before taking first power reading
 
-// Set timers
-Timer.set( CONFIG.readinterval * 1000, true, TakeReading );
-Timer.set( CONFIG.blinkinterval * 1000, true, LightBlinken );
+Timer.set( CONFIG.blinkinterval * 1000, true, PlugBrains );
+
