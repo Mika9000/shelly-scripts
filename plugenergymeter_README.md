@@ -35,18 +35,18 @@ const CONFIG = {
   readinterval: 60, //seconds
   blinkinterval: 2,
 
-  brightlight: 100, //Light normal brightness
-  dimlight: 50,     //Blinking light's dimmed phase
+  brightlight: 100, //normal brightness
+  dimlight: 50,     //dimmed phase when blinking
 
-  powerColors: [
-    { reading: -3500, color: [0,100,12], blink: true },  //Bluish green
-    { reading: -1500, color: [12,100,0], blink: false }, //Green
-    { reading: -100, color: [100,69,0], blink: false },  //Greenish yellow
-    { reading: 100, color: [100,31,0], blink: false },   //Orange
-    { reading: 1000, color: [100,12,0], blink: false },  //Reddish orange
-    { reading: 3500, color: [100,0,0], blink: false },   //Red
-    { reading: 9999, color: [100,0,6], blink: true },    //Bright red
-    { reading: 10001, color: [31,31,31], blink: false }  //White, error/wait
+  colorlist: [
+    { power: -3500, color: [0,100,12], blink: true },  //Bluish green
+    { power: -1500, color: [12,100,0], blink: false }, //Green
+    { power: -100, color: [100,69,0], blink: false },  //Greenish yellow
+    { power: 500, color: [100,31,0], blink: false },   //Orange
+    { power: 1500, color: [100,12,0], blink: false },  //Reddish orange
+    { power: 3500, color: [100,0,0], blink: false },   //Red
+    { power: 9999, color: [100,0,6], blink: true },    //Bright red
+    { power: 10001, color: [31,31,31], blink: false }  //White, error/wait
   ]
   
 };
@@ -76,13 +76,13 @@ Household&apos;s average energy consumption (Watts). This value is added to the 
 
 **readinterval**
 
-How often new power reading is obtained and light color updated (seconds)
+How often power readings are obtained (seconds)
 
 Be polite, if the API you&apos;re getting readings from isn&apos;t yours, consider what would be an appropriate time interval to call it.
 
 **blinkinterval**
 
-Frequency how fast the light is pulsating (seconds). Do not set to awfully fast, as the command execution takes time and they may collide with each other.
+How fast the light is pulsating or changes color to reflect a new power reading (seconds). Do not set awfully fast, as the blink command takes time and may override each other.
 
 **brightlight**
 
@@ -90,19 +90,18 @@ Brightness of the light when fully lit (scale 0-100)
 
 **dimlight**
 
-Brightness of the light when it is set to pulsate and it is in the dimmed phase (scale 0-100)
+Brightness of the light when it is set to pulsate and is in the dimmed phase (scale 0-100)
 
-**powerColors**
+**colorlist**
 
-A list of power readings and their corresponding colors, and whether the light is blinking or not. The color value is a standard Shelly Plug rgb color matrix, where each individual color component has a scale of 0–100.
+A list of power readings and their corresponding colors, and whether the light is blinking or not. The color value is a standard Shelly Plug rgb color matrix, each individual color component has a scale of 0–100.
 
 The list is checked from top to bottom, and when the measured power is lower than the power value in a row, the values ​​of that row are used.
 
-The list can be edited freely, items can be added or removed. The only things to notice are that the power readings must be in ascending order, highest consumption last, and that the last item (value 10001) is reserved for startup and error condition, which turns the light white. If you have power values greater than this, increase this item&apos;s value so that it still is the last one, and change the **PLEASEWAIT** constant in the code (default value: 10000) to match it.
+The list can be edited freely, items can be added or removed. The only things to notice are that the power readings must be in ascending order, highest consumption last, and that the last item (value 10001) is reserved for startup and error condition, which turns the light white. If you have power values greater than this, increase this item&apos;s value so that it still is the last one, and change the **READINGWAIT** constant in the code (default value: 10000) to match it.
 
 # Running
 
 Check that the script is configured correctly and persistent mode is set, and start it. The plug should illuminate and first go white and then change color to match the current power reading.
 
-The script uses two timers. One is used to get the power reading and set the color, the other to pulse the light if blinking of the selected color is enabled. 
-
+The script sets a timer that it uses both to get the power reading and to blink the light and change color.
